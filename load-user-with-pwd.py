@@ -14,6 +14,8 @@ import logging
 
 _version = 0.4
 
+
+# filter used for logging only users created to the log file
 class usersFilter(logging.Filter):
     def filter(self, record):
         return record.getMessage().startswith('user created')
