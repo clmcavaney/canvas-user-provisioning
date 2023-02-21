@@ -4,6 +4,9 @@ Provision a user in a Canvas instance, similar to a SIS import, but from the CLI
 
 ## Usage
 
+You will need a Canvas API bearer token to use this script.  That token will need to be contained in an environment variable called `CANVAS_ACCESS_TOKEN`.
+
+
 ```
 usage: load-user-with-pwd.py [-h] [--version] [-d] [-p] [-l] [-a {canvas,saml}] [--login-id LOGIN_ID]
                              [--sis-user-id SIS_USER_ID] [--sortable-name SORTABLE_NAME]
