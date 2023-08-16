@@ -11,14 +11,16 @@ import random
 import secrets
 import json
 import logging
+import art
 
-_version = 0.4
+_version = 0.5
 
 
 # filter used for logging only users created to the log file
 class usersFilter(logging.Filter):
     def filter(self, record):
-        return record.getMessage().startswith('user created')
+        _msg = record.getMessage()
+        return _msg.startswith('user created') or _msg.startswith('login created')
 
 
 # lifted from https://gist.github.com/asfaltboy/79a02a2b9871501af5f00c95daaeb6e7
@@ -62,6 +64,12 @@ def generate_password():
     return password
 
 
+# ensure the domain does not include '.instructure.com' - or just truncate that if supplied
+def canvas_subdomain(subdomain):
+    _sd = re.sub(r'([A-Za-z0-9.]+).instructure.com', r'\1', subdomain)
+    return _sd
+
+
 if 'CANVAS_ACCESS_TOKEN' not in os.environ:
     print('Can\'t find Canvas Access Token in your environment.  Make sure that an environment variable "CANVAS_ACCESS_TOKEN" is set.')
     sys.exit(1)
@@ -76,10 +84,11 @@ parser.add_argument('-a', '--auth', dest='auth_type', choices=['canvas','saml'],
 parser.add_argument(dest='fn', type=str, help='First name')
 parser.add_argument(dest='ln', type=str, help='Last name')
 parser.add_argument(dest='email', type=EmailType('RFC5322'), help='email address')
-parser.add_argument(dest='subdomain', type=str, help='Canvas subdomain (i.e. sandbox - "christopher", or customer - "qed", or special - "queensland.security", basically anything prior to ".instructure.com")')
+parser.add_argument(dest='subdomain', type=canvas_subdomain, help='Canvas subdomain (i.e. sandbox - "christopher", or customer - "qed", or special - "queensland.security", basically anything prior to ".instructure.com")')
 parser.add_argument('--login-id', dest='login_id', type=str, help='Specify an explicit login_id for the user, otherwise the detauls is a randomly generated one')
 parser.add_argument('--sis-user-id', dest='sis_user_id', type=str, help='Specify an explicit SIS user_id for the user, otherwise the detauls is a randomly generated one')
 parser.add_argument('--sortable-name', dest='sortable_name', type=str, help='Specify a "sortable name" for the user.  Default "<last name>, <first name>"')
+parser.add_argument('--primary-login', dest='primary_login', type=canvas_subdomain, help='If specified, should be the domain of a primary instance of a Canvas consortia.  A login (aka pseudonym) will be created on this instance for the user.')
 
 args = parser.parse_args()
 
@@ -96,6 +105,7 @@ for key in args.__dict__:
 
 _inst_sub_domain = ('.' + environment if environment == 'beta' else '')
 print('_inst_sub_domain == "{}"'.format(_inst_sub_domain))
+art.tprint(environment if environment == 'beta' else 'prod')
 
 
 data_output_location = 'data-output'
@@ -127,7 +137,7 @@ _instance = _canvas_instance_tpl.format(args.subdomain, _inst_sub_domain)
 
 logger.info('Connecting to {}'.format(_instance))
 
-c = Canvas(_instance, log_level='debug', CANVAS_ACCESS_TOKEN=os.getenv('CANVAS_ACCESS_TOKEN'))
+c = Canvas(_instance, log_level='debug' if args.debug is True else 'info', CANVAS_ACCESS_TOKEN=os.getenv('CANVAS_ACCESS_TOKEN'))
 
 # generate a random: unique_id, sis_user_id
 _code = ''.join(random.choice(string.ascii_letters) for c in range(8)) + ''.join(random.choice(string.digits) for d in range(2))
@@ -165,21 +175,84 @@ if args.auth_type == 'canvas':
     payload['pseudonym[password]'] = _password
 
 
+_canvas_user_id = '<FAKE USER ID - NOT LIVE>'
 if args.live_mode is True:
     #resp = c.accounts('self').users.post(data={}, http_headers={}, do_json=False, **{'params': payload})
     resp = c.accounts('self').users.post(**{'params': payload})
     if resp.status_code == 200:
         print('User successfully created')
         print('password:{}'.format(_password))
-        logger.info('user created - F:{} L:{} LID:{} SID:{} PWD:{} E:{} SN:"{}"'.format(args.fn, args.ln, _login_id, _sis_user_id, _password, args.email, _sortable_name))
+        _canvas_user_id = resp.json()['id']
+        logger.info('user created - SD:{} F:{} L:{} LID:{} SID:{} PWD:{} E:{} SN:"{}" CID:{}'.format(args.subdomain, args.fn, args.ln, _login_id, _sis_user_id, _password, args.email, _sortable_name, _canvas_user_id))
     else:
-        print('An error occured creting the user')
+        print('An error occurred creting the user')
         print(resp.text)
         print(resp.json())
 else:
     print('**NOT LIVE**: would have created user with this payload:\n{}'.format(json.dumps(payload, indent=2)))
     print('**NOT LIVE**: password would have been: {}'.format(_password))
-    logger.info('user created - **NOT LIVE** - F:{} L:{} LID:{} SID:{} PWD:{} E:{} SN:"{}"'.format(args.fn, args.ln, _login_id, _code, _password, args.email, _sortable_name))
+    logger.info('user created - **NOT LIVE** - SD:{} F:{} L:{} LID:{} SID:{} PWD:{} E:{} SN:"{}" CID:{}'.format(args.subdomain, args.fn, args.ln, _login_id, _sis_user_id, _password, args.email, _sortable_name, _canvas_user_id))
+
+
+# If the primary_login parameter has been specified, act on that here
+# Need to get the shard ID of the specific child instance
+if args.primary_login is not None:
+    # instance of the "primary" of the consortia
+    _instance = _canvas_instance_tpl.format(args.primary_login, _inst_sub_domain)
+    logger.info('Connecting to {}'.format(_instance))
+    c = Canvas(_instance, log_level='debug' if args.debug is True else 'info', CANVAS_ACCESS_TOKEN=os.getenv('CANVAS_ACCESS_TOKEN'))
+
+    if args.live_mode is True:
+        print('Searching for shard of the child instance where the user record was created')
+        # NOTE: Some Canvas environments (e.g. syd-security), the canvas_account_id will not be '1', but something else
+        # There currently isn't a consortia setup there, so not too much of an issue
+        resp = c.accounts(1).root_accounts.get(http_headers={'Accept':'application/json+canvas-string-ids'})
+        if resp.status_code == 200:
+            # Find the relevant root_account (aka instance) via a generator expression of a generator expression
+            # Looks crazy but there can be multiple domains for an instance, so need to search all for the one we are looking for
+            root_account_details = next((root_account for root_account in resp.json() if next((domain for domain in root_account['domains'] if domain['host'] == _canvas_instance_tpl.format(args.subdomain, '')), None) is not None), None)
+            # Extract the 'id' for the relevant instance
+            root_account_id = root_account_details['id']
+            print('Found root account ID "{}"'.format(root_account_id))
+            # Strip off the 0's to the end
+            # e.g. 201330000000000001 --> group 1 "20133", group 2 "1"
+            matches = re.match(r"^([0-9]{5})0+([1-9])$", root_account_id)
+            shard_id = None
+            if matches is None:
+                print('Error, shard ID couldn\'t be found')
+                sys.exit(2)
+            else:
+                shard_id = matches.group(1)
+        else:
+            print('An error occured finding the instance shard')
+            print(resp.text)
+            print(resp.json())
+            sys.exit(2)
+    else:
+        shard_id = '<FAKE SHARD ID - NOT LIVE>'
+
+
+    full_canvas_user_id = f'{shard_id}~{_canvas_user_id}'
+    payload = {
+        'user[id]': full_canvas_user_id,
+        'login[unique_id]': _login_id,
+        'login[sis_user_id]': _sis_user_id,
+    }
+    if args.auth_type == 'canvas':
+        payload['login[password]'] = _password
+
+    if args.live_mode is True:
+        resp = c.accounts('self').logins.post(params=payload)
+        if resp.status_code == 200:
+            print('Login successfully created')
+            logger.info('login created - PSD:{} LID:{} SID:{} CID:{}'.format(args.primary_login, _login_id, _sis_user_id, full_canvas_user_id))
+        else:
+            print('An error occurred creating the user')
+            print(resp.text)
+            print(resp.json())
+    else:
+        print('**NOT LIVE**: would have created a login on the primary ({}) with this payload:\n{}'.format(args.primary_login, json.dumps(payload, indent=2)))
+        logger.info('login created - **NOT LIVE** - PSD:{} LID:{} SID:{} CID:{}'.format(args.primary_login, _login_id, _sis_user_id, full_canvas_user_id))
 
 
 # vim:expandtab ts=4 sw=4
