@@ -12,8 +12,9 @@ import secrets
 import json
 import logging
 import art
+import uuid
 
-_version = 0.5
+_version = 0.6
 
 
 # filter used for logging only users created to the log file
@@ -85,10 +86,11 @@ parser.add_argument(dest='fn', type=str, help='First name')
 parser.add_argument(dest='ln', type=str, help='Last name')
 parser.add_argument(dest='email', type=EmailType('RFC5322'), help='email address')
 parser.add_argument(dest='subdomain', type=canvas_subdomain, help='Canvas subdomain (i.e. sandbox - "christopher", or customer - "qed", or special - "queensland.security", basically anything prior to ".instructure.com")')
-parser.add_argument('--login-id', dest='login_id', type=str, help='Specify an explicit login_id for the user, otherwise the detauls is a randomly generated one')
-parser.add_argument('--sis-user-id', dest='sis_user_id', type=str, help='Specify an explicit SIS user_id for the user, otherwise the detauls is a randomly generated one')
+parser.add_argument('--login-id', dest='login_id', type=str, help='Specify an explicit login_id for the user, otherwise the default is a randomly generated one')
+parser.add_argument('--sis-user-id', dest='sis_user_id', type=str, help='Specify an explicit SIS user_id for the user, otherwise the default is a randomly generated one')
 parser.add_argument('--sortable-name', dest='sortable_name', type=str, help='Specify a "sortable name" for the user.  Default "<last name>, <first name>"')
 parser.add_argument('--primary-login', dest='primary_login', type=canvas_subdomain, help='If specified, should be the domain of a primary instance of a Canvas consortia.  A login (aka pseudonym) will be created on this instance for the user.')
+parser.add_argument('--integration-id', dest='integration_id', type=str, help='Specify an explicit integration_id for the user.  If specified with no value, then a value (i.e. UUID) will be generated.  If not specified, no value will be supplied with the user.', default='not-specified', nargs='?')
 
 args = parser.parse_args()
 
@@ -174,6 +176,16 @@ if args.auth_type == 'canvas':
     _password = generate_password()
     payload['pseudonym[password]'] = _password
 
+_integration_id = args.integration_id
+# parameter specified, but no value
+if args.integration_id is None:
+    # do UUID stuff here
+    _integration_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, _login_id))
+    payload['pseudonym[integration_id]'] = _integration_id
+elif args.integration_id != 'not-specified':
+    # take what was specified
+    payload['pseudonym[integration_id]'] = _integration_id
+
 
 _canvas_user_id = '<FAKE USER ID - NOT LIVE>'
 if args.live_mode is True:
@@ -240,6 +252,8 @@ if args.primary_login is not None:
     }
     if args.auth_type == 'canvas':
         payload['login[password]'] = _password
+    if args.integration_id is None or args.integration_id != 'not-specified':
+        payload['login[integration_id]'] = _integration_id
 
     if args.live_mode is True:
         resp = c.accounts('self').logins.post(params=payload)
