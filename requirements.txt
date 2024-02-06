@@ -1,1 +1,2 @@
 py-canvas-api>=0.2.7
+art
