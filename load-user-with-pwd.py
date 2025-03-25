@@ -84,7 +84,8 @@ parser.add_argument('-l', '--live', dest='live_mode', action='store_true', defau
 parser.add_argument('-a', '--auth', dest='auth_type', choices=['canvas','saml'], default='canvas', help='Authentication type.  For "saml" no password will be generated as it isn\'t required.')
 parser.add_argument(dest='fn', type=str, help='First name')
 parser.add_argument(dest='ln', type=str, help='Last name')
-parser.add_argument(dest='email', type=EmailType('RFC5322'), help='email address')
+# nargs='?' makes this positional argument optional
+parser.add_argument(dest='email', type=EmailType('RFC5322'), help='email address', nargs='?')
 parser.add_argument(dest='subdomain', type=canvas_subdomain, help='Canvas subdomain (i.e. sandbox - "christopher", or customer - "qed", or special - "queensland.security", basically anything prior to ".instructure.com")')
 parser.add_argument('--login-id', dest='login_id', type=str, help='Specify an explicit login_id for the user, otherwise the default is a randomly generated one')
 parser.add_argument('--sis-user-id', dest='sis_user_id', type=str, help='Specify an explicit SIS user_id for the user, otherwise the default is a randomly generated one')
@@ -165,11 +166,14 @@ payload = {
     'pseudonym[unique_id]': _login_id,
     'pseudonym[sis_user_id]': _sis_user_id,
     'pseudonym[authentication_provider_id]': args.auth_type,
-    'communication_channel[skip_confirmation]': 'true',
-    'communication_channel[type]': 'email',
-    'communication_channel[address]': args.email,
-    'enable_sis_reactivation':'true'
+    'enable_sis_reactivation': 'true'
 }
+
+# only add in email if it has been specified at the command line
+if args.email is not None:
+    payload['communication_channel[skip_confirmation]'] = 'true'
+    payload['communication_channel[type]'] = 'email'
+    payload['communication_channel[address]'] = args.email
 
 _password = None
 if args.auth_type == 'canvas':
