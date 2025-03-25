@@ -81,17 +81,17 @@ parser.add_argument('--version', action='version', version='%(prog)s {}'.format(
 parser.add_argument('-d', '--debug', dest='debug', action='store_true', help='Turn on debugging')
 parser.add_argument('-p', '--use-prod', dest='use_prod', action='store_true', help='By default the script will run against the beta environment.  This flag changes the behaviour to the prod environment for both source and destination.')
 parser.add_argument('-l', '--live', dest='live_mode', action='store_true', default=False, help='Run in live mode (default is to not make changes - aka "dry run")')
-parser.add_argument('-a', '--auth', dest='auth_type', choices=['canvas','saml'], default='canvas', help='Authentication type.  For "saml" no password will be generated as it isn\'t required.')
+parser.add_argument('-a', '--auth', dest='auth_type', choices=['canvas','saml','not-specified'], default='canvas', help='Authentication type.  Note: For "saml" no password will be generated as it isn\'t required.')
 parser.add_argument(dest='fn', type=str, help='First name')
 parser.add_argument(dest='ln', type=str, help='Last name')
 # nargs='?' makes this positional argument optional
 parser.add_argument(dest='email', type=EmailType('RFC5322'), help='email address', nargs='?')
 parser.add_argument(dest='subdomain', type=canvas_subdomain, help='Canvas subdomain (i.e. sandbox - "christopher", or customer - "qed", or special - "queensland.security", basically anything prior to ".instructure.com")')
 parser.add_argument('--login-id', dest='login_id', type=str, help='Specify an explicit login_id for the user, otherwise the default is a randomly generated one')
-parser.add_argument('--sis-user-id', dest='sis_user_id', type=str, help='Specify an explicit SIS user_id for the user, otherwise the default is a randomly generated one')
+parser.add_argument('--sis-user-id', dest='sis_user_id', type=str, help='Specify an explicit SIS user_id for the user.  If specified with no value, then a randomly generated value will be used.  If not specified, no value will be supplied with the user record.', default='not-specified', nargs='?')
 parser.add_argument('--sortable-name', dest='sortable_name', type=str, help='Specify a "sortable name" for the user.  Default "<last name>, <first name>"')
 parser.add_argument('--primary-login', dest='primary_login', type=canvas_subdomain, help='If specified, should be the domain of a primary instance of a Canvas consortia.  A login (aka pseudonym) will be created on this instance for the user.')
-parser.add_argument('--integration-id', dest='integration_id', type=str, help='Specify an explicit integration_id for the user.  If specified with no value, then a value (i.e. UUID) will be generated.  If not specified, no value will be supplied with the user.', default='not-specified', nargs='?')
+parser.add_argument('--integration-id', dest='integration_id', type=str, help='Specify an explicit integration_id for the user.  If specified with no value, then a value (i.e. UUID) will be generated.  If not specified, no value will be supplied with the user record.', default='not-specified', nargs='?')
 
 args = parser.parse_args()
 
@@ -149,10 +149,7 @@ if args.login_id is None:
     _login_id = _code
 else:
     _login_id = args.login_id
-if args.sis_user_id is None:
-    _sis_user_id = _code
-else:
-    _sis_user_id = args.sis_user_id
+
 if args.sortable_name is None:
     _sortable_name = args.ln + ', ' + args.fn
 else:
@@ -164,10 +161,23 @@ payload = {
     'user[skip_registration]': 'true',
     'pseudonym[send_confirmation]': 'false',
     'pseudonym[unique_id]': _login_id,
-    'pseudonym[sis_user_id]': _sis_user_id,
-    'pseudonym[authentication_provider_id]': args.auth_type,
     'enable_sis_reactivation': 'true'
 }
+
+_sis_user_id = args.sis_user_id
+if args.sis_user_id is None:
+    # use randomly generated code
+    _sis_user_id = _code
+    payload['pseudonym[sis_user_id]'] = _sis_user_id
+elif args.sis_user_id != 'not-specified':
+    # take what was specified
+    payload['pseudonym[sis_user_id]'] = _sis_user_id
+
+
+# only add an authentication_provider_id if specified
+if args.auth_type != 'not-specified':
+    payload['pseudonym[authentication_provider_id]'] = args.auth_type
+
 
 # only add in email if it has been specified at the command line
 if args.email is not None:
