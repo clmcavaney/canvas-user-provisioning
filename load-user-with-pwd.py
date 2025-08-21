@@ -14,7 +14,7 @@ import logging
 import art
 import uuid
 
-_version = 0.6
+_version = 0.8
 
 
 # filter used for logging only users created to the log file
@@ -88,10 +88,10 @@ parser.add_argument(dest='ln', type=str, help='Last name')
 parser.add_argument(dest='email', type=EmailType('RFC5322'), help='email address', nargs='?')
 parser.add_argument(dest='subdomain', type=canvas_subdomain, help='Canvas subdomain (i.e. sandbox - "christopher", or customer - "qed", or special - "queensland.security", basically anything prior to ".instructure.com")')
 parser.add_argument('--login-id', dest='login_id', type=str, help='Specify an explicit login_id for the user, otherwise the default is a randomly generated one')
-parser.add_argument('--sis-user-id', dest='sis_user_id', type=str, help='Specify an explicit SIS user_id for the user.  If specified with no value, then a randomly generated value will be used.  If not specified, no value will be supplied with the user record.', default='not-specified', nargs='?')
+parser.add_argument('--sis-user-id', dest='sis_user_id', type=str, help='Specify an explicit SIS user_id for the user.  If specified with \'not-specified\', then a randomly generated value will be used.  If not specified, no value will be supplied with the user record.', default=None)
 parser.add_argument('--sortable-name', dest='sortable_name', type=str, help='Specify a "sortable name" for the user.  Default "<last name>, <first name>"')
 parser.add_argument('--primary-login', dest='primary_login', type=canvas_subdomain, help='If specified, should be the domain of a primary instance of a Canvas consortia.  A login (aka pseudonym) will be created on this instance for the user.')
-parser.add_argument('--integration-id', dest='integration_id', type=str, help='Specify an explicit integration_id for the user.  If specified with no value, then a value (i.e. UUID) will be generated.  If not specified, no value will be supplied with the user record.', default='not-specified', nargs='?')
+parser.add_argument('--integration-id', dest='integration_id', type=str, help='Specify an explicit integration_id for the user.  If specified with \'not-specified\', then a value (i.e. UUID) will be generated.  If not specified, no value will be supplied with the user record.', default=None)
 
 args = parser.parse_args()
 
@@ -165,11 +165,11 @@ payload = {
 }
 
 _sis_user_id = args.sis_user_id
-if args.sis_user_id is None:
+if args.sis_user_id == 'not-specified':
     # use randomly generated code
     _sis_user_id = _code
     payload['pseudonym[sis_user_id]'] = _sis_user_id
-elif args.sis_user_id != 'not-specified':
+elif args.sis_user_id is not None:
     # take what was specified
     payload['pseudonym[sis_user_id]'] = _sis_user_id
 
@@ -192,11 +192,11 @@ if args.auth_type == 'canvas':
 
 _integration_id = args.integration_id
 # parameter specified, but no value
-if args.integration_id is None:
+if args.integration_id == 'not-specified':
     # do UUID stuff here
     _integration_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, _login_id))
     payload['pseudonym[integration_id]'] = _integration_id
-elif args.integration_id != 'not-specified':
+elif args.integration_id is not None:
     # take what was specified
     payload['pseudonym[integration_id]'] = _integration_id
 
@@ -209,7 +209,7 @@ if args.live_mode is True:
         print('User successfully created')
         print('password:{}'.format(_password))
         _canvas_user_id = resp.json()['id']
-        logger.info('user created - SD:{} F:{} L:{} LID:{} SID:{} PWD:{} E:{} SN:"{}" CID:{}'.format(args.subdomain, args.fn, args.ln, _login_id, _sis_user_id, _password, args.email, _sortable_name, _canvas_user_id))
+        logger.info('user created - SD:{} F:{} L:{} LID:{} SID:{} IID:{} PWD:{} E:{} SN:"{}" CID:{}'.format(args.subdomain, args.fn, args.ln, _login_id, _sis_user_id, _integration_id, _password, args.email, _sortable_name, _canvas_user_id))
     else:
         print('An error occurred creting the user')
         print(resp.text)
@@ -217,7 +217,7 @@ if args.live_mode is True:
 else:
     print('**NOT LIVE**: would have created user with this payload:\n{}'.format(json.dumps(payload, indent=2)))
     print('**NOT LIVE**: password would have been: {}'.format(_password))
-    logger.info('user created - **NOT LIVE** - SD:{} F:{} L:{} LID:{} SID:{} PWD:{} E:{} SN:"{}" CID:{}'.format(args.subdomain, args.fn, args.ln, _login_id, _sis_user_id, _password, args.email, _sortable_name, _canvas_user_id))
+    logger.info('user created - **NOT LIVE** - SD:{} F:{} L:{} LID:{} SID:{} IID:{} PWD:{} E:{} SN:"{}" CID:{}'.format(args.subdomain, args.fn, args.ln, _login_id, _sis_user_id, _integration_id, _password, args.email, _sortable_name, _canvas_user_id))
 
 
 # If the primary_login parameter has been specified, act on that here
